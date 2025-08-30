@@ -239,4 +239,6 @@ plt.plot(x, f, 'ro', label="Data Points")
 plt.title("Cubic Spline Interpolation")
 plt.legend()
 plt.grid(True)
+
 plt.show()
+
