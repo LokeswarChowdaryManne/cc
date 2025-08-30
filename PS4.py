@@ -69,6 +69,7 @@ if p_value < 0.05:
 else:
     print("Conclusion: No significant difference between Euler's method and exact solution (p ≥ 0.05)")
 
+#----------------------------------------------------------------------------------------------------------------------------------------------------
 
 #Runge Kutta method
 import numpy as np
@@ -152,4 +153,5 @@ else:
 
 mean_abs_error = np.mean(np.abs(y_rk4 - y_exact_at_rk4))
 max_error = np.max(np.abs(y_rk4 - y_exact_at_rk4))
+
 print(f"\nError Analysis:\nMean Absolute Error = {mean_abs_error:.6f}\nMaximum Error = {max_error:.6f}")
