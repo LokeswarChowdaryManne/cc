@@ -1,177 +1,439 @@
-"""
-Plagiarism Checker Assignment
------------------------------
+#MIN HASH----------------------------------------------------------------------------------------------
+  # MinHash using permutation
 
-To maintain the integrity of your data, it’s a good idea to reduce duplicate documents 
-in the system. Plagiarism Checker helps us to detect duplicates. The database has N documents. 
-The common structure of each document is title, author names, affiliation, abstract, keywords, 
-Paper content, Conclusion. A Plagiarism Checker reads a new document and adds it to the database 
-if it is not a duplicate of any document in the database. 
-
-Design a Plagiarism Checker with the following features:
-
-A) Verify if the titles are exactly same (Apply BinaryDistance(u,v), which gives the
-   binary distance between vectors u and v, equal to 0 if they are identical and 1 otherwise.).
-   If same, label the document as duplicate and discard it else proceed to second part of the Checker.
-
-B) Represent documents (Paper content) as term document vectors with weight of a
-   term in a document computed as:
-        w_ik = (tf_ik / len_i) * log( (N+1) / (0.5 + df_k) )
-   where tf_ik = term frequency, len_i = document length, df_k = document frequency, N = total docs.
-
-C) Identify a document as duplicate if the cosine similarity of the document 
-   with any existing document is more than the threshold α (α = 0.85).
-
-D) Identify k-Shingles (N grams) in the documents and apply Jaccard similarity to
-   identify duplicates.
-
-E) Apply probability retrieval model (Okapi BM25) to identify duplicates.
-
-Dataset:
---------
-D1: Information requirement: query considers the user feedback as information requirement to search.
-D2: Information retrieval: query depends on the model of information retrieval used.
-D3: Prediction problem: Many problems in information retrieval can be viewed as prediction problems
-D4: Search: A search engine is one of applications of information retrieval models.
-
-New documents:
-D5: Feedback: feedback is typically used by the system to modify the query and improve prediction
-D6: Information retrieval: ranking in information retrieval algorithms depends on user query
-"""
-
-import re
-import math
+import random
 import numpy as np
-from collections import Counter
-from sklearn.metrics.pairwise import cosine_similarity
 
-# ------------------- Utility Functions -------------------
+# Example documents
+docs = [
+    "the cat sat on the mat",
+    "the dog sat on the mat",
+    "the cat chased the dog"
+]
 
-def tokenize(text):
-    """Lowercase and tokenize a document into words."""
-    return re.findall(r'\w+', text.lower())
+# Step 1: Shingling (k=2 or 3)
+def get_shingles(doc, k=2):
+    words = doc.split()
+    return {" ".join(words[i:i+k]) for i in range(len(words)-k+1)}
 
-def binary_distance(u, v):
-    """Return 0 if two titles are identical, else 1."""
-    return 0 if u.strip().lower() == v.strip().lower() else 1
+k = 2
+shingle_set = set()
+doc_shingles = []
 
-# ------------------- Weight Calculation -------------------
+for d in docs:
+    sh = get_shingles(d, k)
+    print(sh)
+    doc_shingles.append(sh)
+    shingle_set |= sh
 
-def compute_term_weights(documents):
-    """
-    Compute term weights using the given formula:
-    w_ik = (tf_ik / len_i) * log( (N+1) / (0.5 + df_k) )
-    """
-    tokenized_docs = [tokenize(doc) for doc in documents]
-    N = len(tokenized_docs)  # total number of docs
-    df = Counter()  # document frequency
+print("Doc :: ", doc_shingles)
+shingles = list(shingle_set)
+print("Shin : ", shingles)
 
-    # Count document frequency
-    for doc in tokenized_docs:
-        for term in set(doc):
-            df[term] += 1
+# Step 2: Build binary shingle–document matrix
+matrix = []
+for sh in shingles:
+    row = [1 if sh in doc_shingles[j] else 0 for j in range(len(docs))]
+    matrix.append(row)
 
-    # Build term weights for each document
-    weights = []
-    vocab = sorted(set(term for doc in tokenized_docs for term in doc))
+sd_matrix = np.array(matrix)
 
-    for doc in tokenized_docs:
-        tf = Counter(doc)  # term frequency
-        len_i = len(doc)   # document length
-        vector = []
-        for term in vocab:
-            tf_ik = tf[term]
-            if tf_ik > 0:
-                weight = (tf_ik / len_i) * math.log((N + 1) / (0.5 + df[term]))
-            else:
-                weight = 0.0
-            vector.append(weight)
-        weights.append(vector)
-    return np.array(weights), vocab
+print("Shingle–Document Matrix:")
+print(sd_matrix)
 
-# ------------------- Similarity Measures -------------------
+# Step 3: MinHash Implementation
+num_shingles, num_docs = sd_matrix.shape
+num_hashes = 5  # number of permutations
+signature = np.full((num_hashes, num_docs), np.inf)
 
-def cosine_sim_matrix(weights):
-    """Compute cosine similarity between documents."""
-    return cosine_similarity(weights)
+rows = list(range(num_shingles))
+permutations = [random.sample(rows, len(rows)) for _ in range(num_hashes)]
+print("Per :: ", permutations)
 
-def jaccard_similarity(doc1, doc2, k=3):
-    """Compute Jaccard similarity between two docs using k-shingles."""
-    shingles1 = set([doc1[i:i+k] for i in range(len(doc1)-k+1)])
-    shingles2 = set([doc2[i:i+k] for i in range(len(doc2)-k+1)])
-    return len(shingles1 & shingles2) / len(shingles1 | shingles2)
+for i, perm in enumerate(permutations):
+    for col in range(num_docs):
+        counter = 1
+        for row in perm:
+            if sd_matrix[row, col] == 1:
+                signature[i, col] = counter
+                break
+            counter += 1
 
-def bm25_score(query_tokens, doc_tokens, avgdl, N, df, k1=1.5, b=0.75):
-    """Compute BM25 score of a document for a given query."""
-    score = 0.0
-    len_d = len(doc_tokens)
-    tf = Counter(doc_tokens)
-    for term in query_tokens:
-        if term not in df: 
-            continue
-        idf = math.log((N - df[term] + 0.5) / (df[term] + 0.5) + 1)
-        numerator = tf[term] * (k1 + 1)
-        denominator = tf[term] + k1 * (1 - b + b * len_d / avgdl)
-        score += idf * numerator / denominator
-    return score
+print("\nSignature Matrix:")
+print(signature)
 
-# ------------------- Main Program -------------------
+# Step 4: Similarity from signatures
+def minhash_sim(col1, col2):
+    return np.mean(signature[:, col1] == signature[:, col2])
 
-if __name__ == "__main__":
-    # Sample dataset
-    existing_docs = {
-        "D1": "Information requirement: query considers the user feedback as information requirement to search.",
-        "D2": "Information retrieval: query depends on the model of information retrieval used.",
-        "D3": "Prediction problem: Many problems in information retrieval can be viewed as prediction problems",
-        "D4": "Search: A search engine is one of applications of information retrieval models."
-    }
+print("\nSimilarity between Doc1 & Doc2:", minhash_sim(0, 1))
+print("Similarity between Doc1 & Doc3:", minhash_sim(0, 2))
+print("Similarity between Doc2 & Doc3:", minhash_sim(1, 2))
 
-    new_docs = {
-        "D5": "Feedback: feedback is typically used by the system to modify the query and improve prediction",
-        "D6": "Information retrieval: ranking in information retrieval algorithms depends on user query"
-    }
+#MinHash using hash function
+import random
+import numpy as np
 
-    # Step A: Title check (Binary Distance)
-    print("\nStep A: Title Check (Binary Distance)")
-    for new_id, new_text in new_docs.items():
-        for old_id, old_text in existing_docs.items():
-            dist = binary_distance(new_text.split(":")[0], old_text.split(":")[0])
-            if dist == 0:
-                print(f"{new_id} is duplicate of {old_id} (Title Match)")
-    
-    # Step B + C: Vector model and Cosine Similarity
-    print("\nStep B + C: Vector Space Model with Cosine Similarity")
-    all_docs = list(existing_docs.values()) + list(new_docs.values())
-    weights, vocab = compute_term_weights(all_docs)
-    sim_matrix = cosine_sim_matrix(weights)
+# Example documents
+docs = [
+    "the cat sat on the mat",
+    "the dog sat on the mat",
+    "the cat chased the dog"
+]
 
-    threshold = 0.85
-    doc_ids = list(existing_docs.keys()) + list(new_docs.keys())
-    for i in range(len(existing_docs), len(all_docs)):
-        for j in range(len(existing_docs)):
-            if sim_matrix[i][j] > threshold:
-                print(f"{doc_ids[i]} is duplicate of {doc_ids[j]} (Cosine={sim_matrix[i][j]:.2f})")
+# Step 1: Shingling (k=2 or 3)
+def get_shingles(doc, k=2):
+    words = doc.split()
+    return {" ".join(words[i:i+k]) for i in range(len(words)-k+1)}
 
-    # Step D: k-Shingles + Jaccard
-    print("\nStep D: k-Shingles + Jaccard Similarity")
-    for new_id, new_text in new_docs.items():
-        for old_id, old_text in existing_docs.items():
-            jacc = jaccard_similarity(new_text.lower(), old_text.lower(), k=3)
-            if jacc > 0.5:
-                print(f"{new_id} is duplicate of {old_id} (Jaccard={jacc:.2f})")
+k = 2
+shingle_set = set()
+doc_shingles = []
 
-    # Step E: BM25
-    print("\nStep E: BM25 Scoring")
-    tokenized_docs = [tokenize(doc) for doc in all_docs]
-    N = len(tokenized_docs)
-    avgdl = sum(len(doc) for doc in tokenized_docs) / N
-    df = Counter(term for doc in tokenized_docs for term in set(doc))
+for d in docs:
+    sh = get_shingles(d, k)
+    doc_shingles.append(sh)
+    shingle_set |= sh
 
-    for new_id, new_text in new_docs.items():
-        new_tokens = tokenize(new_text)
-        scores = {}
-        for old_id, old_text in existing_docs.items():
-            old_tokens = tokenize(old_text)
-            scores[old_id] = bm25_score(new_tokens, old_tokens, avgdl, N, df)
-        best_match = max(scores, key=scores.get)
-        print(f"{new_id} most similar to {best_match} (BM25={scores[best_match]:.2f})")
+shingles = list(shingle_set)
+num_shingles = len(shingles)
+
+# Step 2: Build binary shingle–document matrix
+matrix = []
+for sh in shingles:
+    row = [1 if sh in doc_shingles[j] else 0 for j in range(len(docs))]
+    matrix.append(row)
+
+sd_matrix = np.array(matrix)
+
+print("Shingle–Document Matrix:")
+print(sd_matrix)
+
+# Step 3: MinHash using hash functions
+num_shingles, num_docs = sd_matrix.shape
+num_hashes = 5  # number of hash functions
+signature = np.full((num_hashes, num_docs), np.inf)
+
+# Create random hash functions of form: h(x) = (a*x + b) % p
+p = num_shingles  # prime > num_shingles
+hash_funcs = [(random.randint(1, p-1), random.randint(0, p-1)) for _ in range(num_hashes)]
+print("Hash :: ", hash_funcs)
+
+for i, (a, b) in enumerate(hash_funcs):
+    for row in range(num_shingles):
+        hash_val = (a * row + b) % p
+        for col in range(num_docs):
+            if sd_matrix[row, col] == 1:
+                if hash_val < signature[i, col]:
+                    signature[i, col] = hash_val
+
+print("\nSignature Matrix:")
+print(signature.astype(int))
+
+# Step 4: Similarity from signatures
+def minhash_sim(col1, col2):
+    return np.mean(signature[:, col1] == signature[:, col2])
+
+print("\nSimilarity between Doc1 & Doc2:", minhash_sim(0, 1))
+print("Similarity between Doc1 & Doc3:", minhash_sim(0, 2))
+print("Similarity between Doc2 & Doc3:", minhash_sim(1, 2))
+
+# Cosine similarity And Euclidean Case
+
+import numpy as np
+from numpy.linalg import norm
+
+# Example documents
+docs = [
+    "this is a cat",
+    "this is a dog",
+    "cats and dogs are animals",
+    "the dog chased the cat"
+]
+
+# Step 1: Vocabulary
+words = list(set(" ".join(docs).split()))
+
+# Step 2: Term Frequency (TF)
+tf = []
+for d in docs:
+    row = [d.split().count(w) for w in words]
+    tf.append(row)
+tf = np.array(tf)
+
+# Step 3: Inverse Document Frequency (IDF)
+N = len(docs)
+idf = np.log(N / (np.count_nonzero(tf, axis=0)))
+
+# Step 4: TF-IDF
+tfidf = tf * idf
+print("TF-IDF Matrix:\n", tfidf)
+
+# Step 5: Pairwise Cosine Similarity and Euclidean Distance
+num_docs = len(docs)
+
+print("\nCosine Similarities:")
+for i in range(num_docs):
+    for j in range(i+1, num_docs):
+        cosine_sim = np.dot(tfidf[i], tfidf[j]) / (norm(tfidf[i]) * norm(tfidf[j]))
+        print(f"Doc{i+1} vs Doc{j+1}: {cosine_sim:.4f}")
+
+print("\nEuclidean Distances:")
+for i in range(num_docs):
+    for j in range(i+1, num_docs):
+        euclidean_dist = norm(tfidf[i] - tfidf[j])
+        print(f"Doc{i+1} vs Doc{j+1}: {euclidean_dist:.4f}")
+
+#___________________________________________________________________________________________________________
+
+#SVD----------------------------------------------------------------------------------------------
+
+# SVD
+
+import numpy as np
+from numpy.linalg import svd
+
+# Example documents
+docs = [
+    "the cat sat on the mat",
+    "the dog sat on the mat",
+    "the cat chased the dog"
+]
+
+# Step 1: Build vocabulary
+vocab = list(set(" ".join(docs).split()))
+print(vocab)
+
+# Step 2: Build term-document matrix (counts)
+td_matrix = []
+for word in vocab:
+    row = [d.split().count(word) for d in docs]
+    td_matrix.append(row)
+
+A = np.array(td_matrix)
+
+print("Vocabulary:", vocab)
+print("Term-Document Matrix:\n", A)
+
+# Step 3: Singular Value Decomposition
+U, S, Vt = svd(A)
+
+print("\nU:\n", U)
+print("\nS:\n", S)
+print("\nVt:\n", Vt)
+
+import numpy as np
+
+# ==============================
+# Step 1: Example documents
+# ==============================
+docs = [
+    "the cat sat on the mat",
+    "the dog sat on the log",
+    "the cat played with the dog",
+    "dogs and cats are friends"
+]
+
+# ==============================
+# Step 2: Preprocess & Vocabulary
+# ==============================
+def tokenize(doc):
+    return doc.lower().split()
+
+# Build vocabulary
+vocab = sorted(set(word for doc in docs for word in tokenize(doc)))
+print(vocab)
+word_index = {w: i for i, w in enumerate(vocab)}
+print("WI :: ", word_index)
+# ==============================
+# Step 3: Build Term–Document Matrix
+# ==============================
+A = np.zeros((len(vocab), len(docs)), dtype=float)
+
+for j, doc in enumerate(docs):
+    for word in tokenize(doc):
+        A[word_index[word], j] += 1
+
+print("Term–Document Matrix (A):")
+print(A)
+
+# ==============================
+# Step 4: Singular Value Decomposition (SVD)
+# ==============================
+# A = U Σ V^T
+U, s, Vt = np.linalg.svd(A, full_matrices=False)
+
+# Convert singular values into diagonal Σ
+Sigma = np.diag(s)
+
+print("\nU (terms -> concepts):\n", U)
+print("\nΣ (singular values):\n", Sigma)
+print("\nV^T (docs -> concepts):\n", Vt)
+
+# ==============================
+# Step 5: Dimensionality Reduction (LSI)
+# ==============================
+k = 2  # latent dimension
+U_k = U[:, :k]
+Sigma_k = Sigma[:k, :k]
+Vt_k = Vt[:k, :]
+
+# Reduced doc vectors in LSI space
+doc_vectors = np.dot(Sigma_k, Vt_k).T  # shape: (n_docs, k)
+print("\nReduced Document Representations (LSI space):\n", doc_vectors)
+
+# ==============================
+# Step 6: Query Projection
+# ==============================
+query = "cat and dog play together"
+q_vec = np.zeros((len(vocab), 1))
+
+for word in tokenize(query):
+    if word in word_index:
+        q_vec[word_index[word], 0] += 1
+
+print("Query vector:",q_vec)
+
+# Project query into LSI space: q' = (q^T U_k) Σ_k^-1
+q_lsi = np.dot(np.dot(q_vec.T, U_k), np.linalg.inv(Sigma_k))
+print("\nQuery Representation (LSI space):\n", q_lsi)
+
+# ==============================
+# Step 7: Cosine Similarity
+# ==============================
+def cosine_sim(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+print("\nSimilarity of query with each document:")
+for i, doc_vec in enumerate(doc_vectors):
+    sim = cosine_sim(q_lsi.flatten(), doc_vec)
+    print(f"Doc{i+1}: {sim:.3f}")
+
+#___________________________________________________________________________________________________________
+
+#PAGE RANK----------------------------------------------------------------------------------------------
+
+#Page Rank using Power iteration
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+
+def pagerank(adj_matrix, alpha=0.85, tol=1e-6, max_iter=100):
+
+    n = adj_matrix.shape[0]
+
+    # Step 1: Construct hyperlink matrix H
+    H = np.zeros((n, n))
+    for i in range(n):
+        out_links = np.sum(adj_matrix[i])
+        if out_links > 0:
+            H[i] = adj_matrix[i] / out_links
+
+    # Step 2: Fix dangling nodes
+    for i in range(n):
+        if np.sum(H[i]) == 0:
+            H[i] = np.ones(n) / n
+    print(H)
+
+    # Step 3: Google matrix
+    G = alpha * H + (1 - alpha) * (np.ones((n, n)) / n)
+
+    # Step 4: Power iteration
+    rank = np.ones(n) / n
+    for _ in range(max_iter):
+        new_rank = rank @ G
+        if np.linalg.norm(new_rank - rank, 1) < tol:
+            break
+        rank = new_rank
+
+    return rank
+
+
+# ====== Generate Graph ======
+# Example: Directed graph
+G = nx.DiGraph()
+
+# Add edges (you can modify as needed)
+edges = [
+    (1, 2), (2, 5), (3, 1), (3, 2), (3, 4), (3, 5),
+    (4, 5), (5, 4)
+]
+G.add_edges_from(edges)
+
+# Draw graph
+plt.figure(figsize=(6, 6))
+pos = nx.spring_layout(G, seed=42)
+nx.draw(G, pos, with_labels=True)
+plt.title("Directed Graph")
+plt.show()
+
+# ====== Create adjacency matrix ======
+adj_matrix = nx.to_numpy_array(G, nodelist=sorted(G.nodes()), dtype=int)
+print("Adjacency Matrix:\n", adj_matrix)
+
+# ====== Run PageRank ======
+pagerank_scores = pagerank(adj_matrix)
+print("PageRank Scores:", pagerank_scores)
+print("Sum of scores (should be 1):", np.sum(pagerank_scores))
+
+#Page Rank using Eigen vector
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+
+def pagerank_eigen(adj_matrix, alpha=0.85):
+    n = adj_matrix.shape[0]
+
+    # Step 1: Construct hyperlink matrix H
+    H = np.zeros((n, n))
+    for i in range(n):
+        out_links = np.sum(adj_matrix[i])
+        if out_links > 0:
+            H[i] = adj_matrix[i] / out_links
+
+    # Step 2: Fix dangling nodes
+    for i in range(n):
+        if np.sum(H[i]) == 0:
+            H[i] = np.ones(n) / n
+
+    # Step 3: Google matrix
+    G = alpha * H + (1 - alpha) * (np.ones((n, n)) / n)
+
+    # Step 4: Eigen decomposition
+    eigvals, eigvecs = np.linalg.eig(G.T)
+
+    # Find the index of eigenvalue closest to 1
+    idx = np.argmin(np.abs(eigvals - 1))
+
+    # Corresponding eigenvector
+    principal_eigvec = np.real(eigvecs[:, idx])
+    print("evec :: ", principal_eigvec)
+    # Normalize to sum to 1
+    pagerank = principal_eigvec / np.sum(principal_eigvec)
+
+    return pagerank
+
+
+# ====== Generate Graph ======
+G = nx.DiGraph()
+edges = [
+    (1, 2), (2, 5), (3, 1), (3, 2), (3, 4), (3, 5),
+    (4, 5), (5, 4)
+]
+G.add_edges_from(edges)
+
+# Draw graph
+plt.figure(figsize=(6, 6))
+pos = nx.spring_layout(G, seed=42)
+nx.draw(G, pos, with_labels=True, node_size=1000, node_color="skyblue", font_size=12, arrows=True)
+plt.title("Directed Graph")
+plt.show()
+
+# ====== Create adjacency matrix ======
+adj_matrix = nx.to_numpy_array(G, nodelist=sorted(G.nodes()), dtype=int)
+print("Adjacency Matrix:\n", adj_matrix)
+
+# ====== Run PageRank (Eigenvalue Method) ======
+pagerank_scores = pagerank_eigen(adj_matrix)
+print("PageRank Scores:", pagerank_scores)
+print("Sum of scores (should be 1):", np.sum(pagerank_scores))
